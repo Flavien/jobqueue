@@ -1,0 +1,7 @@
+*           text=auto
+*           eol=lf
+
+*.kt        text
+*.kts       text
+*.jar       binary
+gradlew.bat eol=crlf
