@@ -36,6 +36,128 @@ class JobQueueTests {
         timestamps.shouldBeMonotonicallyIncreasing()
     }
 
+    @Test
+    fun submit_cancelledInnerJob(): Unit = runBlocking {
+        val jobQueue = jobQueue()
+
+        val jobs = jobQueue.submitAll(3) {
+            if (it == 2) {
+                cancel()
+            }
+            it.toString()
+        }
+        val results: List<Result<String>> = awaitAll(jobs)
+        jobQueue.cancel()
+
+        jobs.shouldHaveCancelledJob(false, true, false)
+        results.shouldMatchEach(
+            { it shouldBe success("1") },
+            { it should beException<CancellationException>() },
+            { it shouldBe success("3") },
+        )
+    }
+
+    @Test
+    fun submit_cancelledOuterJob(): Unit = runBlocking {
+        val jobQueue = jobQueue()
+
+        val gate = Job()
+        val jobs = jobQueue.submitAll(3) {
+            gate.join()
+            it.toString()
+        }
+        jobs[1].cancel()
+        gate.complete()
+        val results: List<Result<String>> = awaitAll(jobs)
+        jobQueue.cancel()
+
+        jobs.shouldHaveCancelledJob(false, true, false)
+        results.shouldMatchEach(
+            { it shouldBe success("1") },
+            { it should beException<CancellationException>() },
+            { it shouldBe success("3") },
+        )
+    }
+
+    @Test
+    fun submit_failedJob(): Unit = runBlocking {
+        val jobQueue = jobQueue()
+
+        val jobs = jobQueue.submitAll(3) {
+            if (it == 2) {
+                throw ArithmeticException()
+            }
+            it.toString()
+        }
+        val results: List<Result<String>> = awaitAll(jobs)
+        jobQueue.cancel()
+
+        jobs.shouldHaveCancelledJob(false, true, false)
+        results.shouldMatchEach(
+            { it shouldBe success("1") },
+            { it should beException<ArithmeticException>() },
+            { it shouldBe success("3") },
+        )
+    }
+
+    @Test
+    fun submit_cancelledQueue(): Unit = runBlocking {
+        val jobQueue = jobQueue()
+
+        val jobs = jobQueue.submitAll(3) {
+            if (it == 2) {
+                jobQueue.cancel()
+            }
+            it.toString()
+        }
+        val results: List<Result<String>> = awaitAll(jobs)
+
+        jobs.shouldHaveCancelledJob(false, true, true)
+        results.shouldMatchEach(
+            { it shouldBe success("1") },
+            { it should beException<CancellationException>() },
+            { it shouldBe beException<CancellationException>() },
+        )
+    }
+
+    @Test
+    fun submit_afterQueueCancelled(): Unit = runBlocking {
+        val jobQueue = jobQueue()
+        jobQueue.cancel()
+
+        val jobs = jobQueue.submitAll(3) {
+            it.toString()
+        }
+        val results: List<Result<String>> = awaitAll(jobs)
+
+        jobs.shouldHaveCancelledJob(true, true, true)
+        results.shouldMatchEach(
+            { it should beException<CancellationException>() },
+            { it should beException<CancellationException>() },
+            { it should beException<CancellationException>() },
+        )
+    }
+
+    @Test
+    fun submit_capacityExceeded(): Unit = runBlocking {
+        val jobQueue = jobQueue(1)
+        val gate = Job()
+        var hasRun = false
+
+        jobQueue.submit {
+            gate.join()
+        }
+
+        assertThrows<IllegalStateException>("The JobQueue is at full capacity") {
+            jobQueue.submit {
+                hasRun = true
+            }
+        }
+        jobQueue.cancel()
+
+        hasRun.shouldBeFalse()
+    }
+
     private fun JobQueue.submitAll(
         count: Int,
         block: suspend CoroutineScope.(Int) -> String
