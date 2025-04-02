@@ -116,7 +116,7 @@ class JobQueueTests {
         results.shouldMatchEach(
             { it shouldBe success("1") },
             { it should beException<CancellationException>() },
-            { it shouldBe beException<CancellationException>() },
+            { it should beException<CancellationException>() },
         )
     }
 
@@ -164,15 +164,5 @@ class JobQueueTests {
     ): List<Deferred<String>> {
         return (1..count)
             .map { submit { block(it) } }
-    }
-
-    private suspend fun awaitAll(jobs: List<Deferred<String>>): List<Result<String>> {
-        return jobs.map { runCatching { it.await() } }
-    }
-
-    private fun List<Job>.shouldHaveCancelledJob(vararg cancelled: Boolean) {
-        map { it.isCancelled } shouldBe cancelled
-        forEach { it.isActive.shouldBeFalse() }
-        forEach { it.isCompleted.shouldBeTrue() }
     }
 }
