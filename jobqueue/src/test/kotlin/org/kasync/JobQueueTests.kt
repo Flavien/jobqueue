@@ -1,7 +1,6 @@
 package org.kasync
 
 import io.kotest.matchers.booleans.shouldBeFalse
-import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeMonotonicallyIncreasing
 import io.kotest.matchers.collections.shouldMatchEach
 import io.kotest.matchers.should

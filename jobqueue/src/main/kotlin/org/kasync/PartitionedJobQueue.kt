@@ -1,6 +1,7 @@
 package org.kasync
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -10,7 +11,7 @@ class PartitionedJobQueue(
 ) {
     private val context: CoroutineContext = coroutineContext + Job(coroutineContext.job)
     private val queues = List(channelCount) {
-        JobQueue(context, channelCount)
+        JobQueue(context, UNLIMITED)
     }
 
     fun <T> submit(
