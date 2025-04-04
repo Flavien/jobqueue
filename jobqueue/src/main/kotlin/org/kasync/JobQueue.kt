@@ -7,8 +7,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
-fun CoroutineScope.jobQueue(capacity: Int = Channel.UNLIMITED) = JobQueue(coroutineContext, capacity)
-
 class JobQueue(
     coroutineContext: CoroutineContext,
     capacity: Int
@@ -58,3 +56,5 @@ class JobQueue(
 }
 
 private class ReadOnlyDeferred<T>(source: Deferred<T>) : Deferred<T> by source
+
+fun CoroutineScope.jobQueue(capacity: Int = Channel.UNLIMITED) = JobQueue(coroutineContext, capacity)

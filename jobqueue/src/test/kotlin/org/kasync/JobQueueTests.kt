@@ -36,7 +36,7 @@ class JobQueueTests {
     }
 
     @Test
-    fun submit_cancelledInnerJob(): Unit = runBlocking {
+    fun submit_cancelInnerJob(): Unit = runBlocking {
         val jobQueue = jobQueue()
 
         val jobs = jobQueue.submitAll(3) {
@@ -57,7 +57,7 @@ class JobQueueTests {
     }
 
     @Test
-    fun submit_cancelledOuterJob(): Unit = runBlocking {
+    fun submit_cancelOuterJob(): Unit = runBlocking {
         val jobQueue = jobQueue()
 
         val gate = Job()

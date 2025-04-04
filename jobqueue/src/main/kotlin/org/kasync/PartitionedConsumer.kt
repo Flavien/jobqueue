@@ -18,6 +18,9 @@ class PartitionedConsumer<T>(
     private val jobQueue = PartitionedJobQueue(scope.coroutineContext, channelCount)
     private val inputChannel = Channel<MessageExecution<T>>(capacity = inputQueueCapacity)
 
+    val job: Job
+        get() = scope.coroutineContext.job
+
     init {
         scope.launch {
             for (message in inputChannel) {

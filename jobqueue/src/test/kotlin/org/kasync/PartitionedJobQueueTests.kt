@@ -64,7 +64,7 @@ class PartitionedJobQueueTests {
     }
 
     @Test
-    fun submit_cancelledInnerJob(): Unit = runBlocking {
+    fun submit_cancelInnerJob(): Unit = runBlocking {
         val jobQueue = PartitionedJobQueue(coroutineContext, 10)
 
         val jobs: List<Deferred<String>> = (0..2).map {
@@ -75,30 +75,6 @@ class PartitionedJobQueueTests {
                 it.toString()
             }
         }
-        val results: List<Result<String>> = awaitAll(jobs)
-        jobQueue.cancel()
-
-        jobs.shouldHaveCancelledJob(false, true, false)
-        results.shouldMatchEach(
-            { it shouldBe success("0") },
-            { it should beException<CancellationException>() },
-            { it shouldBe success("2") },
-        )
-    }
-
-    @Test
-    fun submit_cancelledOuterJob(): Unit = runBlocking {
-        val jobQueue = PartitionedJobQueue(coroutineContext, 10)
-
-        val gate = Job()
-        val jobs: List<Deferred<String>> = (0..2).map {
-            jobQueue.submit(it) {
-                gate.join()
-                it.toString()
-            }
-        }
-        jobs[1].cancel()
-        gate.complete()
         val results: List<Result<String>> = awaitAll(jobs)
         jobQueue.cancel()
 

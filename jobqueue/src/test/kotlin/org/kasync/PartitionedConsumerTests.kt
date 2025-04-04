@@ -8,14 +8,11 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldMatchEach
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.shouldHave
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.matchers.types.shouldBeTypeOf
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import org.junit.jupiter.api.Test
 import java.util.*
 import kotlin.time.Duration.Companion.seconds
@@ -47,7 +44,7 @@ class PartitionedConsumerTests {
 
     @Test
     fun consume_multipleSubscriptions(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(3, 3) { value, throwable ->
+        val consumer = createConsumer<Int>(3, 10) { value, throwable ->
             acknowledgements.add(value to throwable)
         }
 
@@ -74,6 +71,24 @@ class PartitionedConsumerTests {
     }
 
     @Test
+    fun consume_emptySource(): Unit = runBlocking {
+        val consumer = createConsumer<Int>(5, 3) { value, throwable ->
+            acknowledgements.add(value to throwable)
+        }
+
+        val job = flowOf<Pair<Int, Int>>().dispatch(consumer) {
+            processedMessages.add(it)
+        }
+
+        job.join()
+        consumer.stop()
+
+        job.isCancelled.shouldBeFalse()
+        processedMessages shouldHaveSize 0
+        acknowledgements shouldHaveSize 0
+    }
+
+    @Test
     fun consume_cancelDuringCollection(): Unit = runBlocking {
         val consumer = createConsumer<Int>(5, 3) { value, throwable ->
             acknowledgements.add(value to throwable)
@@ -92,6 +107,35 @@ class PartitionedConsumerTests {
         job.isCancelled.shouldBeTrue()
         processedMessages shouldContainExactlyInAnyOrder (0..4).toList()
         acknowledgements shouldHaveSize 0
+    }
+
+    @Test
+    fun consume_processingCancelled(): Unit = runBlocking {
+        val consumer = createConsumer<Int>(3, 5) { value, throwable ->
+            acknowledgements.add(value to throwable)
+        }
+
+        val job = testSource().take(6).dispatch(consumer) {
+            processedMessages.add(it)
+            if (it == 1) {
+                cancel()
+            }
+        }
+
+        job.join()
+        consumer.stop()
+
+        job.isCancelled.shouldBeFalse()
+        processedMessages.slice(0..2) shouldContainExactlyInAnyOrder (0..2).toList()
+        processedMessages.slice(3..5) shouldContainExactlyInAnyOrder (3..5).toList()
+        acknowledgements.shouldMatchEach(
+            { it.second.shouldBeNull() },
+            { it.second.shouldBeInstanceOf<CancellationException>() },
+            { it.second.shouldBeNull() },
+            { it.second.shouldBeNull() },
+            { it.second.shouldBeNull() },
+            { it.second.shouldBeNull() },
+        )
     }
 
     @Test
@@ -121,6 +165,26 @@ class PartitionedConsumerTests {
             { it.second.shouldBeNull() },
             { it.second.shouldBeNull() },
         )
+    }
+
+    @Test
+    fun consume_acknowledgementException(): Unit = runBlocking {
+        val consumer = createConsumer<Int>(5, 3) { value, throwable ->
+            acknowledgements.add(value to throwable)
+            if (value == 2) {
+                throw ArithmeticException()
+            }
+        }
+
+        val job = testSource().dispatch(consumer) {
+            processedMessages.add(it)
+        }
+
+        job.join()
+
+        job.isCancelled.shouldBeTrue()
+        consumer.job.isCancelled.shouldBeTrue()
+        acknowledgements shouldContainExactly (0..2).map { it to null }
     }
 
     private fun testSource() = flow {
