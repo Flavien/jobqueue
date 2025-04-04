@@ -8,9 +8,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldMatchEach
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.shouldHave
 import io.kotest.matchers.types.shouldBeInstanceOf
-import io.kotest.matchers.types.shouldBeTypeOf
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.junit.jupiter.api.Test
@@ -128,14 +126,7 @@ class PartitionedConsumerTests {
         job.isCancelled.shouldBeFalse()
         processedMessages.slice(0..2) shouldContainExactlyInAnyOrder (0..2).toList()
         processedMessages.slice(3..5) shouldContainExactlyInAnyOrder (3..5).toList()
-        acknowledgements.shouldMatchEach(
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeInstanceOf<CancellationException>() },
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeNull() },
-        )
+        acknowledgements.shouldHaveSingleFailure<CancellationException>(count = 6, failureIndex = 1)
     }
 
     @Test
@@ -157,14 +148,7 @@ class PartitionedConsumerTests {
         job.isCancelled.shouldBeFalse()
         processedMessages.slice(0..2) shouldContainExactlyInAnyOrder (0..2).toList()
         processedMessages.slice(3..5) shouldContainExactlyInAnyOrder (3..5).toList()
-        acknowledgements.shouldMatchEach(
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeTypeOf<ArithmeticException>() },
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeNull() },
-            { it.second.shouldBeNull() },
-        )
+        acknowledgements.shouldHaveSingleFailure<ArithmeticException>(count = 6, failureIndex = 1)
     }
 
     @Test
@@ -194,4 +178,17 @@ class PartitionedConsumerTests {
             i++
         }
     }
+
+    private inline fun <reified T : Throwable> List<Pair<Int, Throwable?>>.shouldHaveSingleFailure(
+        count: Int,
+        failureIndex: Int
+    ) = shouldMatchEach(
+        (0..<count).map {
+            if (it == failureIndex) {
+                { pair -> pair.second.shouldBeInstanceOf<T>() }
+            } else {
+                { pair -> pair.second.shouldBeNull() }
+            }
+        }
+    )
 }
