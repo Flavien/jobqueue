@@ -100,7 +100,7 @@ class JobQueueTests {
     }
 
     @Test
-    fun submit_cancelledQueue(): Unit = runBlocking {
+    fun submit_cancelQueue(): Unit = runBlocking {
         val jobQueue = jobQueue()
 
         val jobs = jobQueue.submitAll(3) {
@@ -109,6 +109,33 @@ class JobQueueTests {
             }
             it.toString()
         }
+        val results: List<Result<String>> = awaitAll(jobs)
+
+        jobs.shouldHaveCancelledJob(false, true, true)
+        results.shouldMatchEach(
+            { it shouldBe success("1") },
+            { it should beException<CancellationException>() },
+            { it should beException<CancellationException>() },
+        )
+    }
+
+    @Test
+    fun submit_cancelScope(): Unit = runBlocking{
+        val scopeJob = Job()
+        val jobsFuture: CompletableDeferred<List<Deferred<String>>> = CompletableDeferred()
+
+        launch(scopeJob) {
+            val jobQueue = jobQueue()
+
+            val jobs = jobQueue.submitAll(3) {
+                if (it == 2) {
+                    scopeJob.cancel()
+                }
+                it.toString()
+            }
+            jobsFuture.complete(jobs)
+        }
+        val jobs = jobsFuture.await()
         val results: List<Result<String>> = awaitAll(jobs)
 
         jobs.shouldHaveCancelledJob(false, true, true)
@@ -140,11 +167,10 @@ class JobQueueTests {
     @Test
     fun submit_capacityExceeded(): Unit = runBlocking {
         val jobQueue = jobQueue(1)
-        val gate = Job()
         var hasRun = false
 
         jobQueue.submit {
-            gate.join()
+            Job().join()
         }
 
         assertThrows<IllegalStateException>("The JobQueue is at full capacity") {
