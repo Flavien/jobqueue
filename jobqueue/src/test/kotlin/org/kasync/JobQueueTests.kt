@@ -18,11 +18,11 @@ class JobQueueTests {
         val timestamps = Array(6) { Instant.EPOCH }
 
         val jobs = jobQueue.submitAll(3) {
-            timestamps[2 * (it - 1)] = Instant.now()
+            timestamps[2 * it] = Instant.now()
             delay(50)
-            timestamps[2 * (it - 1) + 1] = Instant.now()
-            it.toString()
+            timestamps[2 * it + 1] = Instant.now()
         }
+        jobs.reversed().forEach { it.join() }
         val results: List<Result<String>> = awaitAll(jobs)
         jobQueue.cancel()
 
@@ -40,10 +40,9 @@ class JobQueueTests {
         val jobQueue = jobQueue()
 
         val jobs = jobQueue.submitAll(3) {
-            if (it == 2) {
+            if (it == 1) {
                 cancel()
             }
-            it.toString()
         }
         val results: List<Result<String>> = awaitAll(jobs)
         jobQueue.cancel()
@@ -63,7 +62,6 @@ class JobQueueTests {
         val gate = Job()
         val jobs = jobQueue.submitAll(3) {
             gate.join()
-            it.toString()
         }
         jobs[1].cancel()
         gate.complete()
@@ -83,10 +81,9 @@ class JobQueueTests {
         val jobQueue = jobQueue()
 
         val jobs = jobQueue.submitAll(3) {
-            if (it == 2) {
+            if (it == 1) {
                 throw ArithmeticException()
             }
-            it.toString()
         }
         val results: List<Result<String>> = awaitAll(jobs)
         jobQueue.cancel()
@@ -104,10 +101,9 @@ class JobQueueTests {
         val jobQueue = jobQueue()
 
         val jobs = jobQueue.submitAll(3) {
-            if (it == 2) {
+            if (it == 1) {
                 jobQueue.cancel()
             }
-            it.toString()
         }
         val results: List<Result<String>> = awaitAll(jobs)
 
@@ -128,10 +124,9 @@ class JobQueueTests {
             val jobQueue = jobQueue()
 
             val jobs = jobQueue.submitAll(3) {
-                if (it == 2) {
+                if (it == 1) {
                     scopeJob.cancel()
                 }
-                it.toString()
             }
             jobsFuture.complete(jobs)
         }
@@ -151,9 +146,7 @@ class JobQueueTests {
         val jobQueue = jobQueue()
         jobQueue.cancel()
 
-        val jobs = jobQueue.submitAll(3) {
-            it.toString()
-        }
+        val jobs = jobQueue.submitAll(3) { }
         val results: List<Result<String>> = awaitAll(jobs)
 
         jobs.shouldHaveCancelledJob(true, true, true)
@@ -185,9 +178,13 @@ class JobQueueTests {
 
     private fun JobQueue.submitAll(
         count: Int,
-        block: suspend CoroutineScope.(Int) -> String
+        block: suspend CoroutineScope.(Int) -> Unit
     ): List<Deferred<String>> {
-        return (1..count)
-            .map { submit { block(it) } }
+        return (0..<count).map {
+            submit {
+                block(it)
+                (it + 1).toString()
+            }
+        }
     }
 }
