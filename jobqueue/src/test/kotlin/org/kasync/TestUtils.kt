@@ -8,10 +8,12 @@ import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 
-suspend fun awaitAll(jobs: List<Deferred<String>>): List<Result<String>> =
-    jobs.map {
+suspend fun awaitAll(jobs: List<Deferred<String>>): List<Result<String>> {
+    jobs.last().join()
+    return jobs.map {
         runCatching { it.await() }
     }
+}
 
 inline fun <reified T : Throwable> beException() = Matcher<Result<Any>> { value ->
     val exception = value.exceptionOrNull()

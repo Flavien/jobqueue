@@ -2,10 +2,20 @@ package org.kasync
 
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.collections.shouldBeMonotonicallyIncreasing
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldMatchEach
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.time.Instant
@@ -22,7 +32,6 @@ class JobQueueTests {
             delay(50)
             timestamps[2 * it + 1] = Instant.now()
         }
-        jobs.reversed().forEach { it.join() }
         val results: List<Result<String>> = awaitAll(jobs)
         jobQueue.cancel()
 
@@ -38,16 +47,20 @@ class JobQueueTests {
     @Test
     fun submit_cancelInnerJob(): Unit = runBlocking {
         val jobQueue = jobQueue()
+        val completed = mutableListOf<Int>()
 
         val jobs = jobQueue.submitAll(3) {
             if (it == 1) {
                 cancel()
+                yield()
             }
+            completed.add(it)
         }
         val results: List<Result<String>> = awaitAll(jobs)
         jobQueue.cancel()
 
         jobs.shouldHaveCancelledJob(false, true, false)
+        completed shouldContainExactly listOf(0, 2)
         results.shouldMatchEach(
             { it shouldBe success("1") },
             { it should beException<CancellationException>() },
@@ -58,10 +71,12 @@ class JobQueueTests {
     @Test
     fun submit_cancelOuterJob(): Unit = runBlocking {
         val jobQueue = jobQueue()
+        val completed = mutableListOf<Int>()
 
         val gate = Job()
         val jobs = jobQueue.submitAll(3) {
             gate.join()
+            completed.add(it)
         }
         jobs[1].cancel()
         gate.complete()
@@ -69,6 +84,7 @@ class JobQueueTests {
         jobQueue.cancel()
 
         jobs.shouldHaveCancelledJob(false, true, false)
+        completed shouldContainExactly listOf(0, 2)
         results.shouldMatchEach(
             { it shouldBe success("1") },
             { it should beException<CancellationException>() },
