@@ -11,6 +11,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.time.Instant
 import kotlin.Result.Companion.success
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 class JobQueueTests {
     @Test
@@ -132,6 +135,25 @@ class JobQueueTests {
     }
 
     @Test
+    fun submit_cancelQueueNonCancellableJobs(): Unit = runBlocking {
+        val jobQueue = jobQueue()
+
+        val jobs = jobQueue.submitAll(3, NonCancellable) {
+            if (it == 1) {
+                jobQueue.cancel()
+            }
+        }
+        val results: List<Result<String>> = awaitAll(jobs)
+
+        jobs.shouldHaveCancelledJob(false, true, true)
+        results.shouldMatchEach(
+            { it shouldBe success("1") },
+            { it should beException<CancellationException>() },
+            { it should beException<CancellationException>() },
+        )
+    }
+
+    @Test
     fun submit_cancelScope(): Unit = runBlocking{
         val scopeJob = Job()
         val jobsFuture: CompletableDeferred<List<Deferred<String>>> = CompletableDeferred()
@@ -194,10 +216,11 @@ class JobQueueTests {
 
     private fun JobQueue.submitAll(
         count: Int,
+        context: CoroutineContext = EmptyCoroutineContext,
         block: suspend CoroutineScope.(Int) -> Unit
     ): List<Deferred<String>> {
         return (0..<count).map {
-            submit {
+            submit(context) {
                 block(it)
                 (it + 1).toString()
             }

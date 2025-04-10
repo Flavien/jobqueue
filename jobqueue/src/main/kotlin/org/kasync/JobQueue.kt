@@ -1,9 +1,6 @@
-@file:OptIn(InternalForInheritanceCoroutinesApi::class, ExperimentalCoroutinesApi::class)
-
 package org.kasync
 
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -19,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class JobQueue(
     coroutineContext: CoroutineContext,
     capacity: Int
@@ -27,13 +25,7 @@ class JobQueue(
     private val coroutineScope: CoroutineScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext.job))
 
     init {
-        val loopJob = coroutineScope.coroutineContext.job
-
-        loopJob.invokeOnCompletion {
-            channel.close()
-        }
-
-        coroutineScope.launch(Job() + CoroutineName("JobQueue")) {
+        coroutineScope.launch {
             for (job: Job in channel) {
                 job.join()
             }
@@ -67,6 +59,7 @@ class JobQueue(
     fun cancel() = coroutineScope.cancel()
 }
 
+@OptIn(InternalForInheritanceCoroutinesApi::class)
 private class ReadOnlyDeferred<T>(source: Deferred<T>) : Deferred<T> by source
 
 fun CoroutineScope.jobQueue(capacity: Int = Channel.UNLIMITED) = JobQueue(coroutineContext, capacity)
