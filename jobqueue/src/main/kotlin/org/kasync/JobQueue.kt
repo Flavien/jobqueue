@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
@@ -39,12 +40,8 @@ class JobQueue(
         val result = CompletableDeferred<T>(coroutineScope.coroutineContext.job)
         val future: Deferred<T> = coroutineScope.async(context + result, CoroutineStart.LAZY, task)
 
-        val channelResult = channel.trySend(future)
-
-        when {
-            channelResult.isClosed -> future.cancel()
-            channelResult.isFailure -> error("The JobQueue is at full capacity")
-        }
+        val channelResult: ChannelResult<Unit> = channel.trySend(future)
+        check(channelResult.isSuccess) { "The JobQueue is at full capacity" }
 
         future.invokeOnCompletion { throwable ->
             when (throwable) {
