@@ -3,6 +3,7 @@ package org.kasync
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
@@ -10,6 +11,7 @@ import io.kotest.matchers.collections.shouldMatchEach
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import java.util.*
@@ -33,7 +36,7 @@ class PartitionedConsumerTests {
             acknowledgements.add(value to throwable)
         }
 
-        val job = testSource().take(10).dispatch(consumer) {
+        val job = consumer.consume(testSource().take(10)) {
             processedMessages.add(it)
             delay(100)
         }
@@ -60,8 +63,10 @@ class PartitionedConsumerTests {
                     .onEach { delay(100) }
                     .map { 10 * index + it.first to (it.second + index) }
                     .take(3)
-                    .dispatch(consumer) {
-                        processedMessages.add(it)
+                    .let { flow ->
+                        consumer.consume(flow) {
+                            processedMessages.add(it)
+                        }
                     }
             }
 
@@ -82,7 +87,7 @@ class PartitionedConsumerTests {
             acknowledgements.add(value to throwable)
         }
 
-        val job = flowOf<Pair<Int, Int>>().dispatch(consumer) {
+        val job = consumer.consume(flowOf<Pair<Int, Int>>()) {
             processedMessages.add(it)
         }
 
@@ -100,7 +105,7 @@ class PartitionedConsumerTests {
             acknowledgements.add(value to throwable)
         }
 
-        val job = testSource().dispatch(consumer) {
+        val job = consumer.consume(testSource()) {
             processedMessages.add(it)
             Job().join()
         }
@@ -121,7 +126,7 @@ class PartitionedConsumerTests {
             acknowledgements.add(value to throwable)
         }
 
-        val job = testSource().take(6).dispatch(consumer) {
+        val job = consumer.consume(testSource().take(6)) {
             processedMessages.add(it)
             if (it == 1) {
                 cancel()
@@ -143,7 +148,7 @@ class PartitionedConsumerTests {
             acknowledgements.add(value to throwable)
         }
 
-        val job = testSource().take(6).dispatch(consumer) {
+        val job = consumer.consume(testSource().take(6)) {
             processedMessages.add(it)
             if (it == 1) {
                 throw ArithmeticException()
@@ -160,20 +165,46 @@ class PartitionedConsumerTests {
     }
 
     @Test
+    fun consume_cancelScope(): Unit = runBlocking {
+        val scopeJob = Job()
+        val jobsFuture: CompletableDeferred<Job> = CompletableDeferred()
+
+        launch(scopeJob) {
+            val consumer = createConsumer<Int>(3, 5) { value, throwable ->
+                acknowledgements.add(value to throwable)
+            }
+            val job = consumer.consume(testSource().take(6)) {
+                processedMessages.add(it)
+                if (it == 1) {
+                    scopeJob.cancel()
+                }
+            }
+            jobsFuture.complete(job)
+        }
+        val job = jobsFuture.await()
+        job.join()
+
+        job.isCancelled.shouldBeTrue()
+        processedMessages shouldContainAll listOf(0, 1)
+    }
+
+    @Test
     fun consume_acknowledgementException(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(5, 3) { value, throwable ->
+        val consumerJob = Job()
+        val consumer = PartitionedConsumer<Int>(coroutineContext + consumerJob, 5, 3) { value, throwable ->
             acknowledgements.add(value to throwable)
             if (value == 2) {
                 throw ArithmeticException()
             }
         }
 
-        val job = testSource().dispatch(consumer) {
+        val job = consumer.consume(testSource()) {
             processedMessages.add(it)
         }
 
         job.join()
 
+        consumerJob.isCancelled.shouldBeTrue()
         job.isCancelled.shouldBeTrue()
         consumer.job.isCancelled.shouldBeTrue()
         acknowledgements shouldContainExactly (0..2).map { it to null }

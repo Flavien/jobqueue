@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 allprojects {
     group = "org.kasync"
-    version = "1.0.0"
+    version = "1.1.0"
 }
 
 plugins {

@@ -23,7 +23,7 @@ class JobQueue(
     capacity: Int
 ) {
     private val channel = Channel<Job>(capacity = capacity)
-    private val coroutineScope: CoroutineScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext.job))
+    private val coroutineScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext.job))
 
     init {
         coroutineScope.launch {

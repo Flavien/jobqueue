@@ -21,7 +21,7 @@ class PartitionedConsumer<T>(
     inputQueueCapacity: Int,
     private val ack: suspend (T, Throwable?) -> Unit,
 ) {
-    private val scope = CoroutineScope(coroutineContext + Job())
+    private val scope = CoroutineScope(coroutineContext + Job(coroutineContext.job))
     private val jobQueue = PartitionedJobQueue(scope.coroutineContext, channelCount)
     private val inputChannel = Channel<MessageExecution<T>>(capacity = inputQueueCapacity)
 
@@ -76,7 +76,10 @@ fun <T> CoroutineScope.createConsumer(
     ack = ack
 )
 
-fun <T> Flow<Pair<T, Any>>.dispatch(
+suspend fun <T> Flow<Pair<T, Any>>.dispatch(
     consumer: PartitionedConsumer<T>,
     process: suspend CoroutineScope.(T) -> Unit
-) = consumer.consume(this, process)
+) {
+    val consumerJob: Job = consumer.consume(this, process)
+    consumerJob.join()
+}
