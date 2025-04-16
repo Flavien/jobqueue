@@ -12,8 +12,10 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -31,18 +33,13 @@ class PartitionedConsumerTests {
     private val processedMessages = Collections.synchronizedList(mutableListOf<Int>())
 
     @Test
-    fun consume_queueJobs(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(5, 3) { value, throwable ->
-            acknowledgements.add(value to throwable)
-        }
-
+    fun consume_queueJobs(): Unit = withConsumer(5, 3) { consumer ->
         val job = consumer.consume(testSource().take(10)) {
             processedMessages.add(it)
             delay(100)
         }
 
         job.join()
-        consumer.stop()
 
         job.isCancelled.shouldBeFalse()
         processedMessages shouldHaveSize 10
@@ -52,11 +49,7 @@ class PartitionedConsumerTests {
     }
 
     @Test
-    fun consume_multipleSubscriptions(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(3, 10) { value, throwable ->
-            acknowledgements.add(value to throwable)
-        }
-
+    fun consume_multipleSubscriptions(): Unit = withConsumer(3, 10) { consumer ->
         val jobs: List<Job> = (1..3)
             .map { index ->
                 testSource()
@@ -71,7 +64,6 @@ class PartitionedConsumerTests {
             }
 
         jobs.forEach { it.join() }
-        consumer.stop()
 
         processedMessages shouldHaveSize 9
         processedMessages.slice(0..2) shouldContainExactlyInAnyOrder listOf(10, 20, 30)
@@ -82,17 +74,12 @@ class PartitionedConsumerTests {
     }
 
     @Test
-    fun consume_emptySource(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(5, 3) { value, throwable ->
-            acknowledgements.add(value to throwable)
-        }
-
+    fun consume_emptySource(): Unit = withConsumer(5, 3) { consumer ->
         val job = consumer.consume(flowOf<Pair<Int, Int>>()) {
             processedMessages.add(it)
         }
 
         job.join()
-        consumer.stop()
 
         job.isCancelled.shouldBeFalse()
         processedMessages shouldHaveSize 0
@@ -100,11 +87,7 @@ class PartitionedConsumerTests {
     }
 
     @Test
-    fun consume_cancelDuringCollection(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(5, 3) { value, throwable ->
-            acknowledgements.add(value to throwable)
-        }
-
+    fun consume_cancelDuringCollection(): Unit = withConsumer(5, 3) { consumer ->
         val job = consumer.consume(testSource()) {
             processedMessages.add(it)
             Job().join()
@@ -121,11 +104,7 @@ class PartitionedConsumerTests {
     }
 
     @Test
-    fun consume_processingCancelled(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(3, 5) { value, throwable ->
-            acknowledgements.add(value to throwable)
-        }
-
+    fun consume_processingCancelled(): Unit = withConsumer(3, 5) { consumer ->
         val job = consumer.consume(testSource().take(6)) {
             processedMessages.add(it)
             if (it == 1) {
@@ -134,7 +113,6 @@ class PartitionedConsumerTests {
         }
 
         job.join()
-        consumer.stop()
 
         job.isCancelled.shouldBeFalse()
         processedMessages.slice(0..2) shouldContainExactlyInAnyOrder (0..2).toList()
@@ -143,11 +121,7 @@ class PartitionedConsumerTests {
     }
 
     @Test
-    fun consume_processingError(): Unit = runBlocking {
-        val consumer = createConsumer<Int>(3, 5) { value, throwable ->
-            acknowledgements.add(value to throwable)
-        }
-
+    fun consume_processingError(): Unit = withConsumer(3, 5) { consumer ->
         val job = consumer.consume(testSource().take(6)) {
             processedMessages.add(it)
             if (it == 1) {
@@ -156,7 +130,6 @@ class PartitionedConsumerTests {
         }
 
         job.join()
-        consumer.stop()
 
         job.isCancelled.shouldBeFalse()
         processedMessages.slice(0..2) shouldContainExactlyInAnyOrder (0..2).toList()
@@ -168,12 +141,11 @@ class PartitionedConsumerTests {
     fun consume_cancelScope(): Unit = runBlocking {
         val scopeJob = Job()
         val jobsFuture: CompletableDeferred<Job> = CompletableDeferred()
-
         launch(scopeJob) {
             val consumer = createConsumer<Int>(3, 5) { value, throwable ->
                 acknowledgements.add(value to throwable)
             }
-            val job = consumer.consume(testSource().take(6)) {
+            val job = consumer.consume(testSource()) {
                 processedMessages.add(it)
                 if (it == 1) {
                     scopeJob.cancel()
@@ -210,11 +182,53 @@ class PartitionedConsumerTests {
         acknowledgements shouldContainExactly (0..2).map { it to null }
     }
 
+    @Test
+    fun dispatch_suspendsUntilCompletion(): Unit = withConsumer(3, 5) { consumer ->
+        testSource()
+            .take(6)
+            .dispatch(consumer) {
+                processedMessages.add(it)
+            }
+
+        processedMessages.slice(0..2) shouldContainExactlyInAnyOrder (0..2).toList()
+        processedMessages.slice(3..5) shouldContainExactlyInAnyOrder (3..5).toList()
+        acknowledgements shouldContainExactly (0..5).map { it to null }
+    }
+
+    @Test
+    fun dispatch_suspendsUntilCancellation(): Unit = withConsumer(3, 5) { consumer ->
+        coroutineScope {
+            testSource().dispatch(consumer) {
+                processedMessages.add(it)
+                if (it == 1) {
+                    consumer.stop()
+                }
+            }
+        }
+
+        processedMessages shouldContainAll listOf(0, 1)
+    }
+
     private fun testSource() = flow {
         var i = 0
         while (true) {
             emit(i to i)
             i++
+        }
+    }
+
+    private fun withConsumer(
+        channelCount: Int,
+        inputQueueCapacity: Int,
+        block: suspend CoroutineScope.(PartitionedConsumer<Int>) -> Unit) {
+        runBlocking {
+            val consumer = createConsumer<Int>(channelCount, inputQueueCapacity) { value, throwable ->
+                acknowledgements.add(value to throwable)
+            }
+
+            block(consumer)
+
+            consumer.stop()
         }
     }
 
